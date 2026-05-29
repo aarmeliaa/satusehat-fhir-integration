@@ -1,0 +1,60 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "SATUSEHAT FHIR Integration API",
+    "version": "1.0.0",
+    "description": "Minimal OpenAPI spec for the project's backend routes that proxy SATUSEHAT FHIR endpoints."
+  },
+  "servers": [
+    { "url": "http://localhost:3000", "description": "Local dev" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  },
+  "paths": {
+    "/api/auth/test-auth": {
+      "get": {
+        "summary": "Test obtain access token",
+        "responses": {
+          "200": {
+            "description": "Token obtained",
+            "content": {
+              "application/json": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/fhir/patient": {
+      "get": {
+        "summary": "Search Patient",
+        "parameters": [
+          { "name": "name", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Patient bundle" } }
+      },
+      "post": {
+        "summary": "Create Patient",
+        "requestBody": { "content": { "application/fhir+json": {} } },
+        "responses": { "201": { "description": "Created" } }
+      }
+    },
+    "/api/fhir/practitioner": {
+      "get": { "summary": "Search Practitioner", "responses": { "200": { "description": "Practitioner bundle" } } },
+      "post": { "summary": "Create Practitioner", "requestBody": { "content": { "application/fhir+json": {} } }, "responses": { "201": { "description": "Created" } } }
+    },
+    "/api/fhir/location": {
+      "get": { "summary": "Search Location", "responses": { "200": { "description": "Location bundle" } } },
+      "post": { "summary": "Create Location", "requestBody": { "content": { "application/fhir+json": {} } }, "responses": { "201": { "description": "Created" } } }
+    },
+    "/api/fhir/encounter": {
+      "post": { "summary": "Create Encounter", "requestBody": { "content": { "application/fhir+json": {} } }, "responses": { "201": { "description": "Created" } } }
+    }
+  }
+}

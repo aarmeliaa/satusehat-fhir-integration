@@ -27,13 +27,13 @@ Repositori ini berisi implementasi backend menggunakan `Node.js (Express.js)` un
     ```bash
     npm install
     ```
-3. Buat file .env di root folder (sejajar dengan index.js). Minta credentials dari perwakilan kelompok yang memegang akun DTO Kemenkes, lalu isi dengan format berikut:
+3. Buat file .env di root folder. Minta credentials dari perwakilan kelompok yang memegang akun DTO Kemenkes, lalu isi dengan format berikut:
     ```bash
     PORT=3000
     CLIENT_ID=isi_dengan_client_id_sandbox
     CLIENT_SECRET=isi_dengan_client_secret_sandbox
-    AUTH_URL=https://api-satusehat-dev.kemkes.go.id/oauth2/v1/token
-    BASE_URL=https://api-satusehat-dev.kemkes.go.id/fhir-r4/v1
+    AUTH_URL=https://api-satusehat-stg.dto.kemkes.go.id/oauth2/v1
+    BASE_URL=https://api-satusehat-stg.dto.kemkes.go.id/fhir-r4/v1
     ```
 4. Jalankan server:
     ```bash
