@@ -1,6 +1,6 @@
 # Integrasi API SATUSEHAT - Pendaftaran Pasien (FHIR R4)
 
-Repositori ini berisi implementasi backend menggunakan `Node.js (Express.js)` untuk mensimulasikan proses pendaftaran pasien terintegrasi dengan API SATUSEHAT Kemenkes RI di environment Sandbox.
+Repositori ini berisi implementasi frontend `Next.js` dan backend `Node.js (Express)` untuk mensimulasikan proses pendaftaran pasien terintegrasi dengan API SATUSEHAT Kemenkes RI.
 
 ## Anggota Kelompok
 1. 24/534245/SV/24017 - Ayu Mirnawati
@@ -12,11 +12,14 @@ Repositori ini berisi implementasi backend menggunakan `Node.js (Express.js)` un
 7. 24/544362/SV/25396 - Khaylila Zahra Ardhya Sebayang
 8. 24/545049/SV/25592 - Aliya Khansa Kamaliya
 
-## Tumpukan Teknologi (Tech Stack)
-* **Runtime:** Node.js
-* **Framework:** Express.js
-* **HTTP Client:** Axios
-* **Environment Configuration:** dotenv
+## Arsitektur Proyek
+- `be/` — backend Express yang mengelola otentikasi OAuth SATUSEHAT, proxy FHIR request, dan dokumentasi Swagger.
+- `fe/` — frontend Next.js yang menampilkan UI dan memanggil backend.
+
+## Tech Stack
+- Backend: Node.js, Express.js, Axios, dotenv
+- Frontend: Next.js, React, Tailwind CSS
+- API docs: Swagger UI
 
 ## Cara Menjalankan Backend (Setup)
 1. Clone repositori ini:
@@ -52,9 +55,38 @@ Backend sudah terpasang dengan:
 - Route pembuatan resource FHIR: `Patient`, `Practitioner`, `Location`, `Encounter`
 - Swagger/OpenAPI documentation di `/api/docs`
 
-## Alur Pengerjaan (Progress)
+## Frontend
+- Folder frontend ada di `fe/`
+- Framework: Next.js
+- Untuk menjalankan frontend, gunakan:
+  ```bash
+  cd fe
+  npm install
+  npm run dev -- -p 3001
+  ```
+- Buka aplikasi di browser:
+  ```bash
+  http://localhost:3001
+  ```
+
+## Endpoint Backend Utama
+- `GET /api/auth/test-auth` — tes pengambilan token
+- `POST /api/fhir/patient` — buat `Patient`
+- `POST /api/fhir/practitioner` — buat `Practitioner`
+- `POST /api/fhir/location` — buat `Location`
+- `POST /api/fhir/encounter` — buat `Encounter`
+- `GET /api/fhir/patient?name=...` — cari pasien
+- `GET /api/fhir/practitioner?...` — cari dokter
+- `GET /api/fhir/location?...` — cari lokasi
+
+## Progress Saat Ini
 - [x] Inisialisasi project dan repositori GitHub
 - [x] Mendapatkan `Access Token`
 - [x] Pencarian data referensi (IHS pasien dan dokter)
 - [x] Persiapan lokasi (`POST Location`)
 - [x] Pendaftaran kunjungan (`POST Encounter`)
+
+## Catatan
+- Pastikan `.env` di `be/` tidak dicommit ke Git.
+- Jika ingin mengubah port backend, ubah nilai `PORT` di file `.env`.
+- Dokumentasi Swagger hanya tersedia setelah backend berjalan.
