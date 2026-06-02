@@ -10,7 +10,10 @@ const fhirRoutes = require('./routes/fhir');
 validateConfig();
 
 const app = express();
+const cors = require('cors');
 app.use(express.json());
+
+app.use(cors());
 
 // Swagger UI
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
