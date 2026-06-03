@@ -2,14 +2,14 @@ const axios = require('axios');
 const { config } = require('../config');
 const { getAccessToken } = require('./tokenService');
 
-// ─── FHIR Identifier System URIs ────────────────────────────────────────────
+// FHIR Identifier System URIs 
 const FHIR_SYSTEMS = {
   nik: 'https://fhir.kemkes.go.id/id/nik',
   nip: 'https://fhir.kemkes.go.id/id/nip',
   ihs: 'https://fhir.kemkes.go.id/id/ihs-number',
 };
 
-// ─── Structured error class for FHIR/SATUSEHAT failures ─────────────────────
+// Error class for FHIR/SATUSEHAT failures 
 class FhirError extends Error {
   /**
    * @param {string} message      Human-readable message forwarded to the frontend
@@ -24,7 +24,7 @@ class FhirError extends Error {
   }
 }
 
-// ─── Axios client ────────────────────────────────────────────────────────────
+// Axios client 
 const client = axios.create({
   baseURL: config.baseUrl,
   timeout: 20000,
@@ -33,12 +33,7 @@ const client = axios.create({
   },
 });
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Extract a human-readable message from a FHIR OperationOutcome body.
- * Falls back to a generic message if the structure is unexpected.
- */
+// Helpers 
 function extractOperationOutcomeMessage(data) {
   if (!data || data.resourceType !== 'OperationOutcome') return null;
 
@@ -56,16 +51,12 @@ function extractOperationOutcomeMessage(data) {
   return texts.length > 0 ? texts.join('; ') : 'SATUSEHAT mengembalikan error tanpa keterangan.';
 }
 
-/**
- * Given an axios error thrown by the SATUSEHAT API, convert it into a FhirError
- * with a developer-friendly message and the original OperationOutcome issues.
- */
+
 function parseSatusehatError(error, resourceType) {
   const status = error.response?.status;
   const data = error.response?.data;
   const issues = data?.issue ?? [];
 
-  // Build a clean message from OperationOutcome when available
   const outcomeMessage = extractOperationOutcomeMessage(data);
 
   if (status === 400) {
@@ -128,19 +119,7 @@ function parseSatusehatError(error, resourceType) {
   return new FhirError(fallbackMsg, status || 502, issues);
 }
 
-// ─── BFF Parameter Translators ───────────────────────────────────────────────
-
-/**
- * Translate frontend-friendly Patient query params into FHIR search params.
- *
- * Frontend can send:
- *   ?nik=1234567890123456
- *   ?name=Budi
- *   ?birthdate=1990-01-01
- *   ?_count=10
- *
- * This function converts them into proper FHIR params before forwarding.
- */
+// BFF Parameter Translators 
 function buildPatientFhirParams(frontendQuery) {
   const fhirParams = {};
 
@@ -168,14 +147,9 @@ function buildPatientFhirParams(frontendQuery) {
   return fhirParams;
 }
 
-/**
- * Translate frontend-friendly Practitioner query params into FHIR search params.
- *
- * Frontend can send:
- *   ?nik=1234567890123456
- *   ?nip=198901012015011001
- *   ?name=dr. Budi
- */
+
+ // Translate frontend-friendly Practitioner query params into FHIR search params.
+
 function buildPractitionerFhirParams(frontendQuery) {
   const fhirParams = {};
 
@@ -206,9 +180,7 @@ function buildPractitionerFhirParams(frontendQuery) {
   return fhirParams;
 }
 
-/**
- * Translate frontend-friendly Location query params into FHIR search params.
- */
+ // Translate frontend-friendly Location query params into FHIR search params.
 function buildLocationFhirParams(frontendQuery) {
   const fhirParams = {};
 
@@ -221,24 +193,11 @@ function buildLocationFhirParams(frontendQuery) {
   return fhirParams;
 }
 
-/**
- * Translate frontend-friendly Organization query params into FHIR search params.
- *
- * ⚠️  SATUSEHAT Organization search does NOT support `_id`.
- *     Allowed search params: identifier, name, partof only.
- *
- * Frontend can send:
- *   ?name=Klinik+Sejahtera          → search by facility name
- *   ?identifier=100059              → search by Kode Faskes directly
- *   ?partof=org-uuid                → search child orgs of a parent
- *
- * To read a specific org by UUID, use readFhirResource('Organization', uuid)
- * via the GET /api/fhir/organization/:id route instead.
- */
+
+ // Translate frontend-friendly Organization query params into FHIR search params.
 function buildOrganizationFhirParams(frontendQuery) {
   const fhirParams = {};
 
-  // Note: _id is intentionally NOT forwarded — SATUSEHAT rejects it
   if (frontendQuery.name)        fhirParams.name = frontendQuery.name;
   if (frontendQuery.partof)      fhirParams.partof = frontendQuery.partof;
   if (frontendQuery.identifier)  fhirParams.identifier = frontendQuery.identifier;
@@ -248,13 +207,8 @@ function buildOrganizationFhirParams(frontendQuery) {
   return fhirParams;
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+// Public API 
 
-/**
- * POST a new FHIR resource to SATUSEHAT.
- * @param {string} resourceType  e.g. 'Patient', 'Practitioner', 'Location', 'Encounter'
- * @param {object} payload       Raw FHIR resource body
- */
 async function createFhirResource(resourceType, payload) {
   const token = await getAccessToken();
 
@@ -268,16 +222,6 @@ async function createFhirResource(resourceType, payload) {
   }
 }
 
-/**
- * Read a single FHIR resource directly by its ID (not a search).
- * Maps to: GET /{ResourceType}/{id}
- *
- * Used for direct Organization reads to discover the Kode Faskes,
- * since SATUSEHAT's Organization search does not support ?_id=.
- *
- * @param {string} resourceType  e.g. 'Organization'
- * @param {string} resourceId    The FHIR resource ID (UUID or integer)
- */
 async function readFhirResource(resourceType, resourceId) {
   const token = await getAccessToken();
 
@@ -291,16 +235,7 @@ async function readFhirResource(resourceType, resourceId) {
   }
 }
 
-/**
- * Search FHIR resources on SATUSEHAT.
- *
- * Instead of accepting raw FHIR params, this function accepts TRANSLATED params
- * that are already specific to the resource type (built by the BFF translators
- * inside each controller handler). This keeps the service layer lean.
- *
- * @param {string} resourceType   e.g. 'Patient'
- * @param {object} fhirParams     Already-translated FHIR query params
- */
+
 async function searchFhirResource(resourceType, fhirParams = {}) {
   const token = await getAccessToken();
 
