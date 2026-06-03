@@ -1,31 +1,64 @@
 {
   "openapi": "3.0.1",
   "info": {
-    "title": "SATUSEHAT FHIR Integration API",
+    "title": "SATUSEHAT BFF API",
     "version": "1.0.0",
-    "description": "Minimal OpenAPI spec for the project's backend routes that proxy SATUSEHAT FHIR endpoints."
+    "description": "Backend-for-Frontend (BFF) API untuk integrasi SATUSEHAT. API ini menyembunyikan kompleksitas FHIR dari frontend, melakukan translasi parameter, dan menyediakan error handling yang standar."
   },
   "servers": [
-    { "url": "http://localhost:3000", "description": "Local dev" }
+    {
+      "url": "http://localhost:8000",
+      "description": "Local server"
+    }
   ],
   "components": {
-    "securitySchemes": {
-      "bearerAuth": {
-        "type": "http",
-        "scheme": "bearer",
-        "bearerFormat": "JWT"
+    "schemas": {
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": false },
+          "message": { "type": "string", "example": "Terjemahan pesan error bahasa Indonesia" },
+          "details": {
+            "type": "array",
+            "items": { "type": "object" },
+            "description": "Array dari raw FHIR OperationOutcome issues"
+          }
+        }
+      },
+      "SuccessResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "data": { "type": "object", "description": "Raw data FHIR dari SATUSEHAT" }
+        }
       }
     }
   },
   "paths": {
     "/api/auth/test-auth": {
       "get": {
-        "summary": "Test obtain access token",
+        "summary": "Uji Koneksi Autentikasi",
+        "description": "Mencoba mendapatkan token dari SATUSEHAT menggunakan kredensial yang ada di .env.",
         "responses": {
           "200": {
-            "description": "Token obtained",
+            "description": "Berhasil mendapatkan token",
             "content": {
-              "application/json": {}
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "accessToken": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Gagal mendapatkan token",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
             }
           }
         }
@@ -33,28 +66,78 @@
     },
     "/api/fhir/patient": {
       "get": {
-        "summary": "Search Patient",
+        "summary": "Cari Pasien (BFF)",
+        "description": "Mencari pasien. Frontend cukup mengirim 'nik', backend akan menerjemahkannya ke format identifier FHIR yang rumit.",
         "parameters": [
-          { "name": "name", "in": "query", "schema": { "type": "string" } }
+          { "name": "nik", "in": "query", "description": "16 digit NIK", "schema": { "type": "string" } },
+          { "name": "name", "in": "query", "schema": { "type": "string" } },
+          { "name": "birthdate", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "_count", "in": "query", "schema": { "type": "integer" } }
         ],
-        "responses": { "200": { "description": "Patient bundle" } }
+        "responses": {
+          "200": { "description": "Sukses", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "400": { "description": "Parameter tidak valid", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
       },
       "post": {
-        "summary": "Create Patient",
-        "requestBody": { "content": { "application/fhir+json": {} } },
-        "responses": { "201": { "description": "Created" } }
+        "summary": "Buat Pasien",
+        "requestBody": { "content": { "application/json": {} } },
+        "responses": {
+          "201": { "description": "Berhasil dibuat", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "422": { "description": "Unprocessable Entity", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
       }
     },
     "/api/fhir/practitioner": {
-      "get": { "summary": "Search Practitioner", "responses": { "200": { "description": "Practitioner bundle" } } },
-      "post": { "summary": "Create Practitioner", "requestBody": { "content": { "application/fhir+json": {} } }, "responses": { "201": { "description": "Created" } } }
+      "get": {
+        "summary": "Cari Tenaga Kesehatan (BFF)",
+        "parameters": [
+          { "name": "nik", "in": "query", "description": "16 digit NIK", "schema": { "type": "string" } },
+          { "name": "nip", "in": "query", "description": "18 digit NIP", "schema": { "type": "string" } },
+          { "name": "ihs-number", "in": "query", "schema": { "type": "string" } },
+          { "name": "name", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Sukses", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      },
+      "post": {
+        "summary": "Buat Tenaga Kesehatan",
+        "requestBody": { "content": { "application/json": {} } },
+        "responses": {
+          "201": { "description": "Berhasil dibuat", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      }
     },
     "/api/fhir/location": {
-      "get": { "summary": "Search Location", "responses": { "200": { "description": "Location bundle" } } },
-      "post": { "summary": "Create Location", "requestBody": { "content": { "application/fhir+json": {} } }, "responses": { "201": { "description": "Created" } } }
+      "get": {
+        "summary": "Cari Lokasi/Ruangan",
+        "parameters": [
+          { "name": "name", "in": "query", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Sukses", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      },
+      "post": {
+        "summary": "Buat Lokasi/Ruangan",
+        "requestBody": { "content": { "application/json": {} } },
+        "responses": {
+          "201": { "description": "Berhasil dibuat", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } }
+        }
+      }
     },
     "/api/fhir/encounter": {
-      "post": { "summary": "Create Encounter", "requestBody": { "content": { "application/fhir+json": {} } }, "responses": { "201": { "description": "Created" } } }
+      "post": {
+        "summary": "Buat Kunjungan Medis (Encounter)",
+        "description": "Mendaftarkan kunjungan pasien ke SATUSEHAT.",
+        "requestBody": { "content": { "application/json": {} } },
+        "responses": {
+          "201": { "description": "Berhasil dibuat", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessResponse" } } } },
+          "422": { "description": "Validasi SATUSEHAT gagal (Unprocessable Entity)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } } }
+        }
+      }
     }
   }
 }

@@ -1,193 +1,100 @@
-# 🏥 SATUSEHAT BFF Backend — Postman Testing Guide (v3)
+# 🏥 Panduan Testing API SATUSEHAT (BFF Backend) dengan Postman
 
 > **Environment:** SATUSEHAT Staging (`api-satusehat-stg.dto.kemkes.go.id`)  
 > **Backend Base URL:** `http://localhost:8000`  
-> **Objective:** Walk through the 5-step clinical flow and capture a **201 Created** from the Encounter endpoint.
+> **Tujuan:** Melakukan simulasi alur klinis 5 tahap hingga berhasil mendaftarkan Kunjungan Medis (Encounter) dan mendapatkan respons **201 Created**.
+
+Panduan ini dibuat agar tim bisa langsung mencoba dan mengetes integrasi SATUSEHAT dengan mudah.
 
 ---
 
-## ⚠️ Critical: Two Kinds of Organization ID in SATUSEHAT
+## ⚠️ Persiapan Penting Sebelum Mulai
 
-This is the most common source of confusion. SATUSEHAT has **two different organization identifiers**:
+**Aturan Integrasi SATUSEHAT:**
+Pastikan `CLIENT_ID`, `CLIENT_SECRET`, dan `Organization ID (UUID)` yang kamu gunakan **berasal dari satu akun yang sama** di portal [SATUSEHAT Platform (SSP)](https://satusehat.kemkes.go.id/platform). Mencampur kredensial dari akun yang berbeda akan menyebabkan error.
 
-| ID Type | Format | Used in | Where to find it |
-|---|---|---|---|
-| **UUID** (FHIR resource ID) | `f0930057-d5f7-4dd9-a0f6-465283102ad3` | `Location.managingOrganization` (lenient) | SSP portal → App detail |
-| **Kode Faskes** (integer code) | `100059` or similar short number | `Encounter.serviceProvider` (strictly validated) | SSP portal → Organization profile |
-
-SATUSEHAT's Rule 10124 (`wrong organization ID for serviceProvider`) fires when you use the **UUID** format in `Encounter.serviceProvider` — you must use the **Kode Faskes** integer instead.
-
-**Step 2.5 below** shows how to discover your Kode Faskes using the new `/api/fhir/organization` endpoint.
-
----
-
-## ⚠️ Understanding the Staging Environment
-
-The SATUSEHAT Staging/Sandbox only contains dummy data from Kemenkes — your personal NIK will always return `total: 0`. Use the official dummy NIKs below.
-
----
-
-## Official Kemenkes Dummy Data
-
-### 👤 Dummy Patients
-
-| NIK | Nama | IHS Number |
-|---|---|---|
-| `9271060312000001` | Ardianto Putra | **P02478375538** |
-| `9204014804000002` | Claudia Sintia | **P03647103112** |
-| `9104224509000003` | Elizabeth Dior | **P00805884304** |
-| `9104224606000005` | Ghina Assyifa | **P01654557057** |
-| `9210060207000010` | Syarif Muhammad | **P02428473601** |
-
-### 👨‍⚕️ Dummy Practitioners
-
-| NIK | Nama | IHS Number |
-|---|---|---|
-| `7209061211900001` | dr. Alexander | **10009880728** |
-| `3322071302900002` | dr. Yoga Yandika, Sp.A. | **10006926841** |
-| `3171071609900003` | dr. Syarifuddin, Sp.Pd. | **10001354453** |
-| `3217040109800006` | dr. Olivia Kirana, Sp.OG. | **10002074224** |
-| `3578083008700010` | apt. Aditya Pradhana, S.Farm. | **10001915884** |
-
----
-
-## Prerequisites
-
-### Start the backend
-
+### 1. Jalankan Backend Server
+Buka terminal, masuk ke folder `be`, dan jalankan:
 ```bash
-cd be
-npm start   # or: npm run dev
+npm install
+npm start
 ```
 
-### Postman Environment Variables
+### 2. Setup Environment di Postman
+Di Postman, buat *Environment* baru (misalnya "SATUSEHAT Staging") dan tambahkan variabel berikut:
 
-Create an environment named **SATUSEHAT Staging** with:
-
-| Variable | Value | Notes |
+| Variable | Isi / Nilai (Value) | Keterangan |
 |---|---|---|
-| `BASE_URL` | `http://localhost:8000` | |
-| `KODE_FASKES` | *(fill in Step 2.5)* | Integer Kode Faskes — for Encounter & Location |
-| `PATIENT_IHS` | `P02478375538` | Pre-fill from dummy table above |
-| `PRACTITIONER_IHS` | `10009880728` | Pre-fill from dummy table above |
-| `LOCATION_ID` | *(fill in Step 4)* | UUID from Location POST response |
+| `BASE_URL` | `http://localhost:8000` | URL lokal backend kita |
+| `ORG_ID` | *UUID Organisasi Kamu* | Dapatkan dari portal SSP (contoh: `f0930057-...`) |
+| `PATIENT_IHS` | `P02478375538` | ID Pasien Dummy (Ardianto Putra) |
+| `PRACTITIONER_IHS` | `10009880728` | ID Dokter Dummy (dr. Alexander) |
+| `LOCATION_ID` | *(kosongkan dulu)* | Akan otomatis terisi di Tahap 4 |
+
+Pastikan kamu telah **memilih environment ini** di pojok kanan atas Postman sebelum mulai.
 
 ---
 
-## Step 1 — Verify Authentication
+## 📋 Data Dummy Resmi Kemenkes (Staging)
 
-| | |
-|---|---|
-| **Method** | `GET` |
-| **URL** | `{{BASE_URL}}/api/auth/test-auth` |
+Di environment Staging, NIK asli (KTP kita) **tidak akan ditemukan**. Kamu wajib menggunakan NIK atau IHS Number dummy resmi dari Kemenkes di bawah ini untuk testing:
 
-**Expected:** `200 OK` with `"success": true` and a long JWT `accessToken`.
+| NIK | Nama | **IHS Number (ID)** | Peran |
+|---|---|---|---|
+| `9271060312000001` | Ardianto Putra | **P02478375538** | Pasien (Patient) |
+| `7209061211900001` | dr. Alexander | **10009880728** | Dokter (Practitioner) |
 
----
-
-## Step 2 — Resolve Patient IHS (optional if you use dummy table)
-
-| | |
-|---|---|
-| **Method** | `GET` |
-| **URL** | `{{BASE_URL}}/api/fhir/patient?nik=9271060312000001` |
-
-**Expected:** `total: 1`, `entry[0].resource.id = "P02478375538"`
-
-> **Shortcut:** Skip this. Just set `PATIENT_IHS = P02478375538` manually in your Postman env.
+*(Nilai IHS Number ini sudah kita masukkan ke variabel Postman di langkah persiapan tadi).*
 
 ---
 
-## Step 2.5 — Discover Your Kode Faskes ⭐ NEW — Do This Before Step 5
+## 🚀 Alur Tes 5 Tahap (Clinical Flow)
 
-**Why:** SATUSEHAT Rule 10124 requires `Encounter.serviceProvider` to reference your **Kode Faskes** (integer code), not the UUID from the SSP portal. This new endpoint lets you find it.
+### Tahap 1 — Verifikasi Autentikasi
+Kita pastikan backend bisa terhubung dan mendapatkan token dari SATUSEHAT.
 
-### Request — List all organizations linked to your token
+- **Method:** `GET`
+- **URL:** `{{BASE_URL}}/api/auth/test-auth`
 
-| | |
-|---|---|
-| **Method** | `GET` |
-| **URL** | `{{BASE_URL}}/api/fhir/organization` |
-
-No query params needed — returns all orgs accessible to your credentials.
-
-### Alternative — Look up by your known UUID
-
-```
-GET {{BASE_URL}}/api/fhir/organization?_id=f0930057-d5f7-4dd9-a0f6-465283102ad3
-```
-
-Replace with the UUID you already have.
-
-### Expected Response
-
+**Ekspektasi Respons (200 OK):**
 ```json
 {
     "success": true,
-    "data": {
-        "resourceType": "Bundle",
-        "total": 1,
-        "entry": [
-            {
-                "resource": {
-                    "resourceType": "Organization",
-                    "id": "f0930057-d5f7-4dd9-a0f6-465283102ad3",
-                    "identifier": [
-                        {
-                            "system": "http://sys-ids.kemkes.go.id/organization",
-                            "value": "100059"
-                        }
-                    ],
-                    "name": "Klinik Pratama ...",
-                    "active": true
-                }
-            }
-        ]
-    }
+    "message": "Berhasil mendapatkan token",
+    "accessToken": "eyJhbGciOiJSUzI1NiIsInR5cCI6..."
 }
 ```
 
-### ⭐ Extract the Kode Faskes
+---
 
-Look inside `data.entry[0].resource.identifier`:
+### Tahap 2 — Cari Pasien (Patient)
+*(Opsional: Karena kita sudah set `PATIENT_IHS` di variabel, tahap ini bisa dilewati. Tapi ini cara kerjanya jika mencari lewat NIK).*
 
-```
-identifier[].system  →  "http://sys-ids.kemkes.go.id/organization"
-identifier[].value   →  "100059"   ← THIS is your Kode Faskes
-```
+- **Method:** `GET`
+- **URL:** `{{BASE_URL}}/api/fhir/patient?nik=9271060312000001`
 
-The `id` field (`f0930057-...`) is the UUID.  
-The `identifier[].value` (`100059`) is the **Kode Faskes** you need for the Encounter.
-
-**Save it:** Set Postman env variable `KODE_FASKES` = `100059` (your actual value).
-
-> **If you get an empty Bundle:** SATUSEHAT may restrict listing all orgs. In that case, find your Kode Faskes in the [SSP portal](https://satusehat.kemkes.go.id/platform) under your application's organization profile — it's the short integer code next to the organization name.
+**Ekspektasi Respons (200 OK):** Kamu akan melihat data pasien Ardianto Putra dengan ID `P02478375538`.
 
 ---
 
-## Step 3 — Resolve Practitioner IHS (optional if you use dummy table)
+### Tahap 3 — Cari Dokter (Practitioner)
+*(Opsional: Sama seperti tahap 2, kita sudah punya ID-nya).*
 
-| | |
-|---|---|
-| **Method** | `GET` |
-| **URL** | `{{BASE_URL}}/api/fhir/practitioner?nik=7209061211900001` |
+- **Method:** `GET`
+- **URL:** `{{BASE_URL}}/api/fhir/practitioner?nik=7209061211900001`
 
-**Expected:** `total: 1`, `entry[0].resource.id = "10009880728"`
-
-> **Shortcut:** Set `PRACTITIONER_IHS = 10009880728` manually.
+**Ekspektasi Respons (200 OK):** Kamu akan melihat data dr. Alexander dengan ID `10009880728`.
 
 ---
 
-## Step 4 — Create Location (Poli Umum)
+### Tahap 4 — Daftarkan Ruangan (Location)
+Kita mendaftarkan ruangan klinik (misal: Poli Umum) ke SATUSEHAT. ID Ruangan ini nantinya wajib disertakan saat mendaftarkan kunjungan pasien.
 
-| | |
-|---|---|
-| **Method** | `POST` |
-| **URL** | `{{BASE_URL}}/api/fhir/location` |
-| **Header** | `Content-Type: application/json` |
+- **Method:** `POST`
+- **URL:** `{{BASE_URL}}/api/fhir/location`
+- **Headers:** `Content-Type: application/json`
 
-### Request Body
-
+**Body (JSON):**
 ```json
 {
     "resourceType": "Location",
@@ -205,39 +112,43 @@ The `identifier[].value` (`100059`) is the **Kode Faskes** you need for the Enco
         ]
     },
     "managingOrganization": {
-        "reference": "Organization/{{KODE_FASKES}}"
+        "reference": "Organization/{{ORG_ID}}"
     }
 }
 ```
 
-> Note: `managingOrganization` now uses `KODE_FASKES` (the integer) instead of the UUID.
-
-**Expected:** `201 Created` — save `data.id` (a UUID) into `LOCATION_ID`.
+**Ekspektasi Respons (201 Created):**
+```json
+{
+    "success": true,
+    "data": {
+        "resourceType": "Location",
+        "id": "4079d4e0-bf66-43f7-96b4-8e814a654511",
+        "name": "Poli Umum",
+        ...
+    }
+}
+```
+**TINDAKAN PENTING:** Copy nilai `"id"` dari respons di atas (misal: `4079d4e0-...`), lalu masukkan ke dalam variabel `LOCATION_ID` di Environment Postman kamu.
 
 ---
 
-## Step 5 — Create Encounter (Kunjungan Medis) 🎯
+### Tahap 5 — Daftarkan Kunjungan Medis (Encounter) 🎉
+Ini adalah tahap akhir. Kita akan menggabungkan data Pasien, Dokter, dan Ruangan untuk mendaftarkan kunjungan pasien.
 
-Two fixes applied vs. the previous guide:
-1. **`identifier` field added** — mandatory per SATUSEHAT Rule 10117
-2. **`serviceProvider` uses Kode Faskes** — not the UUID, per Rule 10124
+- **Method:** `POST`
+- **URL:** `{{BASE_URL}}/api/fhir/encounter`
+- **Headers:** `Content-Type: application/json`
 
-### Request
-
-| | |
-|---|---|
-| **Method** | `POST` |
-| **URL** | `{{BASE_URL}}/api/fhir/encounter` |
-| **Header** | `Content-Type: application/json` |
-
-### ✅ Corrected Request Body — Template with Postman Variables
+**Body (JSON):**
+*(Tinggal Copy-Paste, Postman akan otomatis mengambil ID dari environment variables)*
 
 ```json
 {
     "resourceType": "Encounter",
     "identifier": [
         {
-            "system": "http://sys-ids.kemkes.go.id/encounter/{{KODE_FASKES}}",
+            "system": "http://sys-ids.kemkes.go.id/encounter/{{ORG_ID}}",
             "value": "enc-001"
         }
     ],
@@ -290,161 +201,43 @@ Two fixes applied vs. the previous guide:
         }
     ],
     "serviceProvider": {
-        "reference": "Organization/{{KODE_FASKES}}"
+        "reference": "Organization/{{ORG_ID}}"
     }
 }
 ```
 
-### ✅ Concrete Example with IDs Filled In
-
-Replace `YOUR_KODE_FASKES` and `YOUR_LOCATION_UUID` with your actual values:
-
-```json
-{
-    "resourceType": "Encounter",
-    "identifier": [
-        {
-            "system": "http://sys-ids.kemkes.go.id/encounter/YOUR_KODE_FASKES",
-            "value": "enc-001"
-        }
-    ],
-    "status": "arrived",
-    "class": {
-        "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
-        "code": "AMB",
-        "display": "ambulatory"
-    },
-    "subject": {
-        "reference": "Patient/P02478375538",
-        "display": "Ardianto Putra"
-    },
-    "participant": [
-        {
-            "type": [
-                {
-                    "coding": [
-                        {
-                            "system": "http://terminology.hl7.org/CodeSystem/v3-ParticipationType",
-                            "code": "ATND",
-                            "display": "attender"
-                        }
-                    ]
-                }
-            ],
-            "individual": {
-                "reference": "Practitioner/10009880728",
-                "display": "dr. Alexander"
-            }
-        }
-    ],
-    "period": {
-        "start": "2024-06-03T08:00:00+07:00"
-    },
-    "location": [
-        {
-            "location": {
-                "reference": "Location/YOUR_LOCATION_UUID",
-                "display": "Poli Umum"
-            }
-        }
-    ],
-    "statusHistory": [
-        {
-            "status": "arrived",
-            "period": {
-                "start": "2024-06-03T08:00:00+07:00"
-            }
-        }
-    ],
-    "serviceProvider": {
-        "reference": "Organization/YOUR_KODE_FASKES"
-    }
-}
-```
-
-### 🏆 Expected Response — `201 Created`
-
+**Ekspektasi Respons (201 Created) 🏆:**
 ```json
 {
     "success": true,
     "data": {
         "resourceType": "Encounter",
-        "id": "b4c29d7e-1a3f-4b8c-9e2d-5f6a7b8c9d0e",
+        "id": "45e2ca54-e36a-4247-853a-f54d33c40022",
         "status": "arrived",
-        "subject": { "reference": "Patient/P02478375538" },
-        "participant": [{ "individual": { "reference": "Practitioner/10009880728" } }],
-        "location": [{ "location": { "reference": "Location/YOUR_LOCATION_UUID" } }]
+        "subject": {
+            "reference": "Patient/P02478375538",
+            "display": "Ardianto Putra"
+        },
+        ...
     }
 }
 ```
-
-> **📸 Screenshot:** Capture the **`201 Created`** status badge (top-right) + the `"id"` in the response body.
-
----
-
-## Quick-Start Checklist
-
-- [ ] `npm start` the backend (restart if it was running — new endpoint added)
-- [ ] Step 1: `GET /api/auth/test-auth` → `success: true`
-- [ ] Manually set `PATIENT_IHS = P02478375538` in Postman env
-- [ ] Manually set `PRACTITIONER_IHS = 10009880728` in Postman env
-- [ ] **Step 2.5:** `GET /api/fhir/organization` → find `identifier[].value` → set `KODE_FASKES`
-- [ ] Step 4: `POST /api/fhir/location` → copy `data.id` → set `LOCATION_ID`
-- [ ] Step 5: `POST /api/fhir/encounter` with corrected payload → **201 Created** 🎉
+**Selamat! Integrasi SATUSEHAT telah berhasil!** 🚀
 
 ---
 
-## Troubleshooting
+## ℹ️ Sekilas Info: Bagaimana BFF (Backend-for-Frontend) Kita Bekerja?
 
-### ❌ `Encounter.identifier` missing (Rule 10117)
+Frontend tidak perlu tahu kerumitan format URL FHIR SATUSEHAT. Backend kitalah yang menerjemahkannya secara otomatis.
 
-Add the `identifier` array to your Encounter payload. SATUSEHAT makes this mandatory:
+**Contoh saat Frontend mencari pasien:**
+- Frontend kirim: `GET /api/fhir/patient?nik=9271060312000001`
+- Backend teruskan ke SATUSEHAT sebagai: `GET /Patient?identifier=https://fhir.kemkes.go.id/id/nik|9271060312000001`
+
+Begitu juga dengan format error. Semua pesan error rumit dari SATUSEHAT akan ditangkap oleh backend dan dikembalikan ke frontend dalam format JSON yang bersih dan mudah dibaca:
 ```json
-"identifier": [
-    {
-        "system": "http://sys-ids.kemkes.go.id/encounter/YOUR_KODE_FASKES",
-        "value": "enc-001"
-    }
-]
+{
+    "success": false,
+    "message": "Pesan error bahasa Indonesia yang ramah pengguna"
+}
 ```
-
-The `value` can be any unique string identifying this encounter in your system.
-
-### ❌ Wrong org ID for serviceProvider (Rule 10124)
-
-You used the UUID (`f0930057-...`) instead of the **Kode Faskes** integer. Run Step 2.5 to find it, or check the SSP portal. The correct reference looks like `"Organization/100059"` not `"Organization/f0930057-..."`.
-
-### ❌ `total: 0` on Patient/Practitioner search
-
-You're using your personal NIK. Use the official dummy NIKs from the table above.
-
-### ❌ `400 Invalid identifier system` on Location
-
-The `identifier.system` in your Location payload contained a wrong/placeholder org ID. Use the corrected Step 4 payload which omits the `identifier` block on Location.
-
-### ❌ `422 Unprocessable Entity` on Encounter
-
-| Symptom | Fix |
-|---|---|
-| Patient ref wrong | Use the IHS number (e.g., `P02478375538`), not the NIK |
-| Practitioner ref wrong | Use the IHS number (e.g., `10009880728`), not the NIK |
-| Location ref wrong | Use the UUID from Step 4's `data.id` response |
-| `period.start` missing | Required. Use `"2024-06-03T08:00:00+07:00"` |
-| `class` missing | Required. Use `"code": "AMB"` |
-
----
-
-## BFF Translation Reference
-
-| Frontend sends | Backend forwards to SATUSEHAT |
-|---|---|
-| `GET /api/fhir/patient?nik=...` | `GET .../Patient?identifier=https://fhir.kemkes.go.id/id/nik\|...` |
-| `GET /api/fhir/practitioner?nik=...` | `GET .../Practitioner?identifier=https://fhir.kemkes.go.id/id/nik\|...` |
-| `GET /api/fhir/organization` | `GET .../Organization` (with token) |
-| `GET /api/fhir/organization?_id=...` | `GET .../Organization?_id=...` |
-| `POST /api/fhir/location` | `POST .../Location` |
-| `POST /api/fhir/encounter` | `POST .../Encounter` |
-
----
-
-*SATUSEHAT BFF MVP — Staging Environment | Node.js + Express + Axios | FHIR R4 v1*
