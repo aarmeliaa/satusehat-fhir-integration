@@ -194,19 +194,6 @@ function buildLocationFhirParams(frontendQuery) {
 }
 
 
- // Translate frontend-friendly Organization query params into FHIR search params.
-function buildOrganizationFhirParams(frontendQuery) {
-  const fhirParams = {};
-
-  if (frontendQuery.name)        fhirParams.name = frontendQuery.name;
-  if (frontendQuery.partof)      fhirParams.partof = frontendQuery.partof;
-  if (frontendQuery.identifier)  fhirParams.identifier = frontendQuery.identifier;
-  if (frontendQuery._count)      fhirParams._count = frontendQuery._count;
-  if (frontendQuery._page)       fhirParams._page = frontendQuery._page;
-
-  return fhirParams;
-}
-
 // Public API 
 
 async function createFhirResource(resourceType, payload) {
@@ -214,19 +201,6 @@ async function createFhirResource(resourceType, payload) {
 
   try {
     const response = await client.post(`/${resourceType}`, payload, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return response.data;
-  } catch (error) {
-    throw parseSatusehatError(error, resourceType);
-  }
-}
-
-async function readFhirResource(resourceType, resourceId) {
-  const token = await getAccessToken();
-
-  try {
-    const response = await client.get(`/${resourceType}/${resourceId}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     return response.data;
@@ -252,11 +226,9 @@ async function searchFhirResource(resourceType, fhirParams = {}) {
 
 module.exports = {
   createFhirResource,
-  readFhirResource,
   searchFhirResource,
   buildPatientFhirParams,
   buildPractitionerFhirParams,
   buildLocationFhirParams,
-  buildOrganizationFhirParams,
   FhirError,
 };

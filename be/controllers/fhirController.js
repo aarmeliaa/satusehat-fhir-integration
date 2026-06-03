@@ -1,11 +1,9 @@
 const {
   createFhirResource,
-  readFhirResource,
   searchFhirResource,
   buildPatientFhirParams,
   buildPractitionerFhirParams,
   buildLocationFhirParams,
-  buildOrganizationFhirParams,
   FhirError,
 } = require('../services/satusehatService');
 
@@ -124,37 +122,6 @@ async function searchLocation(req, res) {
 }
 
 
- //GET /api/fhir/organization
-
-async function searchOrganization(req, res) {
-  try {
-    const fhirParams = buildOrganizationFhirParams(req.query);
-    const result = await searchFhirResource('Organization', fhirParams);
-    return res.json({ success: true, data: result });
-  } catch (error) {
-    return sendError(res, error);
-  }
-}
-
- // GET /api/fhir/organization/:id
- // Example: GET /api/fhir/organization/f0930057-d5f7-4dd9-a0f6-465283102ad3
-async function readOrganization(req, res) {
-  try {
-    const { id } = req.params;
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        message: 'Organization ID diperlukan di path: /api/fhir/organization/:id',
-        details: [],
-      });
-    }
-    const result = await readFhirResource('Organization', id);
-    return res.json({ success: true, data: result });
-  } catch (error) {
-    return sendError(res, error);
-  }
-}
-
  // GET /api/fhir/search  
 async function searchResource(req, res) {
   try {
@@ -185,7 +152,5 @@ module.exports = {
   searchPatient,
   searchPractitioner,
   searchLocation,
-  searchOrganization,
-  readOrganization,
   searchResource,
 };
