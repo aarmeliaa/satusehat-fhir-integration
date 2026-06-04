@@ -1,93 +1,89 @@
 import { apiClient } from './apiClient';
-import { 
-  FHIRBundle, 
-  FHIRPatient, 
-  FHIRPractitioner, 
-  FHIRLocation, 
+import {
+  FHIRBundle,
+  FHIRPatient,
+  FHIRPractitioner,
+  FHIRLocation,
   FHIREncounter,
-  FHIROperationOutcome 
 } from '@/types';
 
-// Patient APIs
-export const patientAPI = {
-  searchByNIK: async (nik: string): Promise<FHIRBundle> => {
-    // Validate NIK format (16 digits)
-    if (!/^\d{16}$/.test(nik)) {
-      throw new Error('NIK must be exactly 16 digits');
-    }
+// ─── BFF Response shape ───────────────────────────────────────────────────────
+// All responses from our backend are wrapped: { success: true, data: <FHIR> }
+// Error responses:                            { success: false, message: "...", details: [...] }
 
-    // Construct the FHIR identifier query parameter
-    const identifier = `https://fhir.kemkes.go.id/id/nik|${nik}`;
-    
-    const response = await apiClient.get('/api/fhir/patient', {
-      params: {
-        identifier,
-      },
-    });
-    
-    return response.data;
+interface BFFResponse<T> {
+  success: boolean;
+  data: T;
+  message?: string;
+}
+
+/** Unwrap the BFF envelope and return the inner FHIR data. */
+async function bffGet<T>(url: string, params?: Record<string, string>): Promise<T> {
+  const response = await apiClient.get<BFFResponse<T>>(url, { params });
+  return response.data.data;
+}
+
+async function bffPost<T>(url: string, body: unknown): Promise<T> {
+  const response = await apiClient.post<BFFResponse<T>>(url, body);
+  return response.data.data;
+}
+
+// ─── Patient API ──────────────────────────────────────────────────────────────
+export const patientAPI = {
+  /** Search by NIK. Backend translates NIK → FHIR identifier URI automatically. */
+  searchByNIK: async (nik: string): Promise<FHIRBundle> => {
+    if (!/^\d{16}$/.test(nik)) throw new Error('NIK harus tepat 16 digit angka');
+    return bffGet<FHIRBundle>('/api/fhir/patient', { nik });
+  },
+
+  /** Search by name. */
+  searchByName: async (name: string): Promise<FHIRBundle> => {
+    return bffGet<FHIRBundle>('/api/fhir/patient', { name });
   },
 
   create: async (patientData: Partial<FHIRPatient>): Promise<FHIRPatient> => {
-    const response = await apiClient.post('/api/fhir/patient', patientData);
-    return response.data;
-  },
-
-  getAll: async (): Promise<FHIRBundle> => {
-    const response = await apiClient.get('/api/fhir/patient');
-    return response.data;
+    return bffPost<FHIRPatient>('/api/fhir/patient', patientData);
   },
 };
 
-// Practitioner APIs
+// ─── Practitioner API ─────────────────────────────────────────────────────────
 export const practitionerAPI = {
-  search: async (query?: string): Promise<FHIRBundle> => {
-    const response = await apiClient.get('/api/fhir/practitioner', {
-      params: query ? { name: query } : {},
-    });
-    return response.data;
+  /** Search by NIK. */
+  searchByNIK: async (nik: string): Promise<FHIRBundle> => {
+    if (!/^\d{16}$/.test(nik)) throw new Error('NIK harus tepat 16 digit angka');
+    return bffGet<FHIRBundle>('/api/fhir/practitioner', { nik });
   },
 
-  create: async (practitionerData: Partial<FHIRPractitioner>): Promise<FHIRPractitioner> => {
-    const response = await apiClient.post('/api/fhir/practitioner', practitionerData);
-    return response.data;
+  /** Search by name (partial match). */
+  searchByName: async (name: string): Promise<FHIRBundle> => {
+    return bffGet<FHIRBundle>('/api/fhir/practitioner', { name });
   },
 
-  getAll: async (): Promise<FHIRBundle> => {
-    const response = await apiClient.get('/api/fhir/practitioner');
-    return response.data;
+  create: async (data: Partial<FHIRPractitioner>): Promise<FHIRPractitioner> => {
+    return bffPost<FHIRPractitioner>('/api/fhir/practitioner', data);
   },
 };
 
-// Location APIs
+// ─── Location API ─────────────────────────────────────────────────────────────
 export const locationAPI = {
-  search: async (query?: string): Promise<FHIRBundle> => {
-    const response = await apiClient.get('/api/fhir/location', {
-      params: query ? { name: query } : {},
-    });
-    return response.data;
+  /** Search by name. */
+  searchByName: async (name: string): Promise<FHIRBundle> => {
+    return bffGet<FHIRBundle>('/api/fhir/location', { name });
   },
 
-  create: async (locationData: Partial<FHIRLocation>): Promise<FHIRLocation> => {
-    const response = await apiClient.post('/api/fhir/location', locationData);
-    return response.data;
-  },
-
-  getAll: async (): Promise<FHIRBundle> => {
-    const response = await apiClient.get('/api/fhir/location');
-    return response.data;
+  create: async (data: Partial<FHIRLocation>): Promise<FHIRLocation> => {
+    return bffPost<FHIRLocation>('/api/fhir/location', data);
   },
 };
 
-// Encounter APIs
+// ─── Encounter API ────────────────────────────────────────────────────────────
 export const encounterAPI = {
-  create: async (encounterData: Partial<FHIREncounter>): Promise<FHIREncounter> => {
-    const response = await apiClient.post('/api/fhir/encounter', encounterData);
-    return response.data;
+  create: async (data: Partial<FHIREncounter>): Promise<FHIREncounter> => {
+    return bffPost<FHIREncounter>('/api/fhir/encounter', data);
   },
 };
 
-// Auth APIs
+// ─── Auth API ─────────────────────────────────────────────────────────────────
 export const authAPI = {
   testAuth: async (): Promise<any> => {
     const response = await apiClient.get('/api/auth/test-auth');
@@ -95,11 +91,30 @@ export const authAPI = {
   },
 };
 
-// Helper function to extract error message from FHIR OperationOutcome
-export const extractFHIRErrorMessage = (error: any): string => {
-  if (error.response?.data?.issue?.[0]) {
-    const issue = error.response.data.issue[0];
-    return issue.diagnostics || issue.details?.text || issue.code || 'An error occurred';
+// ─── Error helper ─────────────────────────────────────────────────────────────
+/**
+ * Extract a readable error message from the BFF standardized error format.
+ * The BFF backend always returns: { success: false, message: "...", details: [...] }
+ *
+ * Only the `message` string is returned to be shown in the UI.
+ * The `details` array (raw FHIR OperationOutcome) is logged to the console only —
+ * it is intentionally hidden from the user.
+ */
+export const extractBFFErrorMessage = (error: any): string => {
+  const bffData = error?.response?.data;
+
+  if (bffData) {
+    // Log raw FHIR details for developer debugging only — never shown in UI
+    if (bffData.details?.length) {
+      console.error('[SATUSEHAT FHIR Error Details]', bffData.details);
+    }
+
+    // Return the human-readable Indonesian message from the BFF
+    if (bffData.message) {
+      return bffData.message;
+    }
   }
-  return error.message || 'An unexpected error occurred';
+
+  // Fallback: raw axios/network error
+  return error?.message || 'Terjadi kesalahan yang tidak diketahui';
 };

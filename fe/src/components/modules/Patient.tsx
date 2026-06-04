@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search, Plus, User } from 'lucide-react';
+import { Search, Plus, User, Copy, CheckCheck } from 'lucide-react';
 import { FHIRPatient } from '@/types';
 import { patientAPI } from '@/lib/api';
 import { useFetch, useToast } from '@/hooks';
@@ -13,31 +13,34 @@ export const PatientModule: React.FC = () => {
   const [patients, setPatients] = useState<FHIRPatient[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const { isLoading: fetchLoading, error: fetchError, execute: executeFetch } = useFetch();
   const { isLoading: formLoading, execute: executeForm } = useFetch();
   const { toasts, addToast, removeToast } = useToast();
 
   const handleSearch = async () => {
-    const nikTrimmed = searchNIK.trim();
-    if (!/^\d{16}$/.test(nikTrimmed)) {
+    const nik = searchNIK.trim();
+    if (!/^\d{16}$/.test(nik)) {
       addToast('NIK harus tepat 16 digit angka', 'error');
       return;
     }
 
     await executeFetch(async () => {
-      const result = await patientAPI.searchByNIK(nikTrimmed);
-      if (result.entry && result.entry.length > 0) {
-        const patientsList = result.entry
-          .filter((e) => e.resource?.resourceType === 'Patient')
-          .map((e) => e.resource as FHIRPatient);
-        setPatients(patientsList);
+      // BFF contract: just send nik, backend builds the FHIR identifier URI
+      const bundle = await patientAPI.searchByNIK(nik);
+      const patientsList = (bundle.entry ?? [])
+        .filter((e) => e.resource?.resourceType === 'Patient')
+        .map((e) => e.resource as FHIRPatient);
+
+      setPatients(patientsList);
+      setHasSearched(true);
+
+      if (patientsList.length > 0) {
         addToast(`Ditemukan ${patientsList.length} pasien`, 'success');
       } else {
-        setPatients([]);
-        addToast('Pasien tidak ditemukan', 'info');
+        addToast('Pasien tidak ditemukan di database SATUSEHAT', 'info');
       }
-      setHasSearched(true);
     });
   };
 
@@ -54,23 +57,33 @@ export const PatientModule: React.FC = () => {
     if (e.key === 'Enter') handleSearch();
   };
 
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(text);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  // ── Formatting helpers ──────────────────────────────────────────────────────
+
   const formatName = (names?: Array<{ family?: string; given?: string[] }>) => {
     if (!names || names.length === 0) return 'N/A';
-    const name = names[0];
-    return `${(name.given || []).join(' ')} ${name.family || ''}`.trim();
+    const n = names[0];
+    return `${(n.given ?? []).join(' ')} ${n.family ?? ''}`.trim();
   };
 
   const getNIK = (identifiers?: Array<{ system?: string; value?: string }>) => {
     if (!identifiers) return 'N/A';
     const nik = identifiers.find((id) => id.system?.includes('fhir.kemkes.go.id/id/nik'));
-    return nik?.value || 'N/A';
+    return nik?.value ?? 'N/A';
   };
 
   const formatGender = (gender?: string) => {
-    if (gender === 'male') return { label: 'Laki-laki', cls: 'bg-blue-100 text-blue-800' };
+    if (gender === 'male')   return { label: 'Laki-laki', cls: 'bg-blue-100 text-blue-800' };
     if (gender === 'female') return { label: 'Perempuan', cls: 'bg-pink-100 text-pink-800' };
-    return { label: gender || 'N/A', cls: 'bg-gray-100 text-gray-700' };
+    return { label: gender ?? 'N/A', cls: 'bg-gray-100 text-gray-700' };
   };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
@@ -94,14 +107,11 @@ export const PatientModule: React.FC = () => {
             id="input-search-nik"
             type="text"
             value={searchNIK}
-            onChange={(e) => {
-              const value = e.target.value.replace(/\D/g, '').slice(0, 16);
-              setSearchNIK(value);
-            }}
+            onChange={(e) => setSearchNIK(e.target.value.replace(/\D/g, '').slice(0, 16))}
             onKeyDown={handleKeyDown}
-            placeholder="Masukkan NIK (16 digit)"
+            placeholder="Masukkan NIK pasien (16 digit)"
             maxLength={16}
-            className="flex-1 px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+            className="flex-1 px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition font-mono"
           />
           <button
             id="btn-cari-pasien"
@@ -110,11 +120,11 @@ export const PatientModule: React.FC = () => {
             className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <Search size={18} />
-            Cari
+            {fetchLoading ? 'Mencari...' : 'Cari'}
           </button>
         </div>
         <p className="text-xs text-gray-500 mt-2">
-          Masukkan 16 digit NIK tanpa spasi atau karakter khusus.{' '}
+          Masukkan 16 digit NIK.{' '}
           <span className={searchNIK.length > 0 ? 'font-medium text-gray-700' : 'text-gray-400'}>
             {searchNIK.length}/16 karakter
           </span>
@@ -149,7 +159,10 @@ export const PatientModule: React.FC = () => {
                   <th className="px-4 py-3 text-left font-semibold text-gray-700">Nama Lengkap</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-700">Jenis Kelamin</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-700">Tanggal Lahir</th>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-700">FHIR ID</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-700">
+                    IHS Number
+                    <span className="ml-1 text-xs font-normal text-gray-400">(FHIR ID)</span>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -179,7 +192,25 @@ export const PatientModule: React.FC = () => {
                             })
                           : 'N/A'}
                       </td>
-                      <td className="px-4 py-3 text-xs text-gray-500 font-mono">{patient.id}</td>
+                      {/* IHS Number — copy button so it can be used in Encounter */}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <code className="text-xs text-blue-700 bg-blue-50 px-2 py-0.5 rounded font-mono">
+                            {patient.id}
+                          </code>
+                          <button
+                            onClick={() => copyToClipboard(patient.id!)}
+                            title="Salin IHS Number"
+                            className="text-gray-400 hover:text-blue-600 transition-colors"
+                          >
+                            {copiedId === patient.id ? (
+                              <CheckCheck size={14} className="text-green-500" />
+                            ) : (
+                              <Copy size={14} />
+                            )}
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -197,7 +228,7 @@ export const PatientModule: React.FC = () => {
           </div>
           <p className="font-medium text-gray-700">Pasien tidak ditemukan</p>
           <p className="text-sm text-gray-500 mt-1">
-            Coba cari dengan NIK lain atau tambahkan pasien baru.
+            Gunakan NIK dummy resmi Kemenkes untuk environment Staging.
           </p>
         </div>
       )}

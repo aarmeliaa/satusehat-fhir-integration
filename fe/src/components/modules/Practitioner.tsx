@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Search, Plus, Stethoscope, X, RefreshCw } from 'lucide-react';
+import React, { useState } from 'react';
+import { Search, Stethoscope, Copy, CheckCheck, X } from 'lucide-react';
 import { FHIRPractitioner } from '@/types';
 import { practitionerAPI } from '@/lib/api';
 import { useFetch, useToast } from '@/hooks';
@@ -30,9 +30,7 @@ const PractitionerForm: React.FC<PractitionerFormProps> = ({
     qualification: '',
   });
 
-  const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
@@ -40,15 +38,11 @@ const PractitionerForm: React.FC<PractitionerFormProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Build FHIR payload — identifier URIs are required by SATUSEHAT here
+    // (this is a direct POST payload, BFF only translates search params)
     const payload: Partial<FHIRPractitioner> = {
       resourceType: 'Practitioner',
-      name: [
-        {
-          use: 'official',
-          given: [formData.givenName],
-          family: formData.familyName,
-        },
-      ],
+      name: [{ use: 'official', given: [formData.givenName], family: formData.familyName }],
       identifier: [
         ...(formData.nik
           ? [{ system: 'https://fhir.kemkes.go.id/id/nik', value: formData.nik }]
@@ -57,13 +51,10 @@ const PractitionerForm: React.FC<PractitionerFormProps> = ({
           ? [{ system: 'https://fhir.kemkes.go.id/id/nip', value: formData.nip }]
           : []),
       ],
-      qualification: formData.qualification
-        ? [{ code: { text: formData.qualification } }]
-        : [],
+      qualification: formData.qualification ? [{ code: { text: formData.qualification } }] : [],
     };
 
     await onSubmit(payload);
-
     setFormData({ givenName: '', familyName: '', nik: '', nip: '', qualification: '' });
   };
 
@@ -72,7 +63,6 @@ const PractitionerForm: React.FC<PractitionerFormProps> = ({
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center overflow-y-auto">
       <div className="bg-white rounded-xl shadow-2xl max-w-md w-full mx-4 my-8">
-        {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <h2 className="text-lg font-semibold text-gray-900">Tambah Praktisi Baru</h2>
           <button
@@ -85,7 +75,6 @@ const PractitionerForm: React.FC<PractitionerFormProps> = ({
           </button>
         </div>
 
-        {/* Modal Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -104,9 +93,7 @@ const PractitionerForm: React.FC<PractitionerFormProps> = ({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Nama Keluarga
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Nama Keluarga</label>
               <input
                 id="input-pract-family-name"
                 type="text"
@@ -126,10 +113,9 @@ const PractitionerForm: React.FC<PractitionerFormProps> = ({
               type="text"
               name="nik"
               value={formData.nik}
-              onChange={(e) => {
-                const v = e.target.value.replace(/\D/g, '').slice(0, 16);
-                setFormData((p) => ({ ...p, nik: v }));
-              }}
+              onChange={(e) =>
+                setFormData((p) => ({ ...p, nik: e.target.value.replace(/\D/g, '').slice(0, 16) }))
+              }
               placeholder="1234567890123456"
               maxLength={16}
               className="w-full px-3 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-sm font-mono"
@@ -150,7 +136,9 @@ const PractitionerForm: React.FC<PractitionerFormProps> = ({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Kualifikasi / Spesialisasi</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Kualifikasi / Spesialisasi
+            </label>
             <input
               id="input-pract-qualification"
               type="text"
@@ -189,43 +177,43 @@ const PractitionerForm: React.FC<PractitionerFormProps> = ({
 
 export const PractitionerModule: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchMode, setSearchMode] = useState<'nik' | 'name'>('nik');
   const [practitioners, setPractitioners] = useState<FHIRPractitioner[]>([]);
   const [showForm, setShowForm] = useState(false);
-  const [hasLoaded, setHasLoaded] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const { isLoading: fetchLoading, error: fetchError, execute: executeFetch } = useFetch();
   const { isLoading: formLoading, execute: executeForm } = useFetch();
   const { toasts, addToast, removeToast } = useToast();
 
-  const loadPractitioners = useCallback(
-    async (query?: string) => {
-      await executeFetch(async () => {
-        const result = query
-          ? await practitionerAPI.search(query)
-          : await practitionerAPI.getAll();
+  const handleSearch = async () => {
+    const q = searchQuery.trim();
+    if (!q) {
+      addToast('Masukkan NIK atau nama untuk mencari', 'error');
+      return;
+    }
 
-        const list =
-          result.entry
-            ?.filter((e) => e.resource?.resourceType === 'Practitioner')
-            .map((e) => e.resource as FHIRPractitioner) ?? [];
+    await executeFetch(async () => {
+      const bundle =
+        searchMode === 'nik'
+          ? await practitionerAPI.searchByNIK(q)
+          : await practitionerAPI.searchByName(q);
 
-        setPractitioners(list);
-        setHasLoaded(true);
-        if (query && list.length === 0) {
-          addToast('Praktisi tidak ditemukan', 'info');
-        }
-      });
-    },
-    [executeFetch, addToast]
-  );
+      const list = (bundle.entry ?? [])
+        .filter((e) => e.resource?.resourceType === 'Practitioner')
+        .map((e) => e.resource as FHIRPractitioner);
 
-  // Load all on mount
-  useEffect(() => {
-    loadPractitioners();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      setPractitioners(list);
+      setHasSearched(true);
 
-  const handleSearch = () => loadPractitioners(searchQuery.trim() || undefined);
+      if (list.length > 0) {
+        addToast(`Ditemukan ${list.length} praktisi`, 'success');
+      } else {
+        addToast('Praktisi tidak ditemukan', 'info');
+      }
+    });
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') handleSearch();
@@ -240,10 +228,16 @@ export const PractitionerModule: React.FC = () => {
     });
   };
 
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(text);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
   const formatName = (names?: Array<{ family?: string; given?: string[] }>) => {
     if (!names || names.length === 0) return 'N/A';
     const n = names[0];
-    return `${(n.given || []).join(' ')} ${n.family || ''}`.trim();
+    return `${(n.given ?? []).join(' ')} ${n.family ?? ''}`.trim();
   };
 
   const getIdentifier = (
@@ -251,8 +245,10 @@ export const PractitionerModule: React.FC = () => {
     systemKey?: string
   ) => {
     if (!identifiers) return '—';
-    const match = identifiers.find((id) => (systemKey ? id.system?.includes(systemKey) : true));
-    return match?.value || '—';
+    const match = identifiers.find((id) =>
+      systemKey ? id.system?.includes(systemKey) : true
+    );
+    return match?.value ?? '—';
   };
 
   return (
@@ -265,40 +261,66 @@ export const PractitionerModule: React.FC = () => {
           onClick={() => setShowForm(true)}
           className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
         >
-          <Plus size={20} />
+          <Stethoscope size={18} />
           Tambah Praktisi
         </button>
       </div>
 
       {/* Search Bar */}
-      <div className="bg-white p-4 rounded-lg border border-gray-300 shadow-sm">
+      <div className="bg-white p-4 rounded-lg border border-gray-300 shadow-sm space-y-3">
+        {/* Mode Toggle */}
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+          <button
+            onClick={() => { setSearchMode('nik'); setSearchQuery(''); }}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              searchMode === 'nik'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Cari via NIK
+          </button>
+          <button
+            onClick={() => { setSearchMode('name'); setSearchQuery(''); }}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              searchMode === 'name'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Cari via Nama
+          </button>
+        </div>
+
         <div className="flex gap-2">
           <input
             id="input-search-practitioner"
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) =>
+              setSearchQuery(
+                searchMode === 'nik'
+                  ? e.target.value.replace(/\D/g, '').slice(0, 16)
+                  : e.target.value
+              )
+            }
             onKeyDown={handleKeyDown}
-            placeholder="Cari berdasarkan nama praktisi..."
-            className="flex-1 px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+            placeholder={
+              searchMode === 'nik' ? 'Masukkan NIK (16 digit)' : 'Masukkan nama praktisi...'
+            }
+            maxLength={searchMode === 'nik' ? 16 : undefined}
+            className={`flex-1 px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition ${
+              searchMode === 'nik' ? 'font-mono' : ''
+            }`}
           />
           <button
             id="btn-cari-praktisi"
             onClick={handleSearch}
-            disabled={fetchLoading}
+            disabled={fetchLoading || !searchQuery.trim()}
             className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <Search size={18} />
-            Cari
-          </button>
-          <button
-            id="btn-refresh-praktisi"
-            onClick={() => { setSearchQuery(''); loadPractitioners(); }}
-            disabled={fetchLoading}
-            title="Muat ulang semua data"
-            className="flex items-center gap-2 px-3 py-2.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
-          >
-            <RefreshCw size={16} className={fetchLoading ? 'animate-spin' : ''} />
+            {fetchLoading ? 'Mencari...' : 'Cari'}
           </button>
         </div>
       </div>
@@ -315,12 +337,12 @@ export const PractitionerModule: React.FC = () => {
       {fetchLoading && <TableSkeleton rows={4} />}
 
       {/* Results Table */}
-      {!fetchLoading && hasLoaded && practitioners.length > 0 && (
+      {!fetchLoading && hasSearched && practitioners.length > 0 && (
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center gap-2">
             <Stethoscope size={16} className="text-blue-600" />
             <span className="text-sm font-semibold text-gray-700">
-              {practitioners.length} Praktisi
+              {practitioners.length} Praktisi Ditemukan
             </span>
           </div>
           <div className="overflow-x-auto">
@@ -329,27 +351,41 @@ export const PractitionerModule: React.FC = () => {
                 <tr>
                   <th className="px-4 py-3 text-left font-semibold text-gray-700">Nama Lengkap</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-700">NIK</th>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-700">NIP</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-700">Kualifikasi</th>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-700">FHIR ID</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-700">
+                    IHS Number
+                    <span className="ml-1 text-xs font-normal text-gray-400">(FHIR ID)</span>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {practitioners.map((p) => (
                   <tr key={p.id} className="hover:bg-blue-50/40 transition-colors">
-                    <td className="px-4 py-3 font-medium text-gray-900">
-                      {formatName(p.name)}
-                    </td>
+                    <td className="px-4 py-3 font-medium text-gray-900">{formatName(p.name)}</td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-700">
                       {getIdentifier(p.identifier, 'nik')}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-700">
-                      {getIdentifier(p.identifier, 'nip')}
                     </td>
                     <td className="px-4 py-3 text-gray-700">
                       {p.qualification?.[0]?.code?.text ?? '—'}
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-500 font-mono">{p.id}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <code className="text-xs text-blue-700 bg-blue-50 px-2 py-0.5 rounded font-mono">
+                          {p.id}
+                        </code>
+                        <button
+                          onClick={() => copyToClipboard(p.id!)}
+                          title="Salin IHS Number"
+                          className="text-gray-400 hover:text-blue-600 transition-colors"
+                        >
+                          {copiedId === p.id ? (
+                            <CheckCheck size={14} className="text-green-500" />
+                          ) : (
+                            <Copy size={14} />
+                          )}
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -359,14 +395,14 @@ export const PractitionerModule: React.FC = () => {
       )}
 
       {/* Empty State */}
-      {!fetchLoading && hasLoaded && practitioners.length === 0 && (
+      {!fetchLoading && hasSearched && practitioners.length === 0 && (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
           <div className="mx-auto w-14 h-14 bg-gray-100 rounded-full flex items-center justify-center mb-4">
             <Stethoscope size={24} className="text-gray-400" />
           </div>
-          <p className="font-medium text-gray-700">Belum ada data praktisi</p>
+          <p className="font-medium text-gray-700">Praktisi tidak ditemukan</p>
           <p className="text-sm text-gray-500 mt-1">
-            Tambahkan praktisi baru menggunakan tombol di atas.
+            Gunakan NIK dummy resmi Kemenkes untuk environment Staging.
           </p>
         </div>
       )}

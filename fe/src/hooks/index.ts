@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { FHIRBundle, LoadingState, ToastNotification } from '@/types';
+import { LoadingState, ToastNotification } from '@/types';
+import { extractBFFErrorMessage } from '@/lib/api';
 
 export const useFetch = () => {
   const [loading, setLoading] = useState<LoadingState>({
@@ -21,7 +22,7 @@ export const useFetch = () => {
         onSuccess?.(result);
         return { data: result };
       } catch (err: any) {
-        const errorMessage = err.message || 'An error occurred';
+        const errorMessage = extractBFFErrorMessage(err);
         setLoading({ isLoading: false, error: errorMessage });
         return { error: errorMessage };
       }
@@ -36,7 +37,7 @@ export const useToast = () => {
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
 
   const addToast = useCallback(
-    (message: string, type: 'success' | 'error' | 'info' = 'info', duration = 3000) => {
+    (message: string, type: 'success' | 'error' | 'info' = 'info', duration = 4000) => {
       const id = Date.now().toString();
       const newToast: ToastNotification = { id, message, type, duration };
       setToasts((prev) => [...prev, newToast]);

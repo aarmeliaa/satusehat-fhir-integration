@@ -1,39 +1,35 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { ClipboardPlus, Send, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
-import { FHIREncounter, FHIRPatient, FHIRPractitioner, FHIRLocation } from '@/types';
-import { encounterAPI, patientAPI, practitionerAPI, locationAPI } from '@/lib/api';
+import React, { useState } from 'react';
+import { ClipboardPlus, Send, CheckCircle2, AlertCircle } from 'lucide-react';
+import { FHIREncounter } from '@/types';
+import { encounterAPI, patientAPI } from '@/lib/api';
 import { useFetch, useToast } from '@/hooks';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 interface EncounterFormState {
-  patientId: string;
+  // Patient
   patientNIK: string;
-  practitionerId: string;
+  patientIHS: string;
+  patientName: string;
+  // Practitioner
+  practitionerIHS: string;
+  // Location
   locationId: string;
+  // Encounter details
+  orgId: string;
   status: string;
-  serviceType: string;
-  reasonText: string;
 }
 
 const INITIAL_FORM: EncounterFormState = {
-  patientId: '',
   patientNIK: '',
-  practitionerId: '',
+  patientIHS: '',
+  patientName: '',
+  practitionerIHS: '',
   locationId: '',
-  status: 'in-progress',
-  serviceType: '',
-  reasonText: '',
-};
-
-// ─── Helper ────────────────────────────────────────────────────────────────────
-
-const formatName = (names?: Array<{ family?: string; given?: string[] }>) => {
-  if (!names || names.length === 0) return 'Tanpa Nama';
-  const n = names[0];
-  return `${(n.given || []).join(' ')} ${n.family || ''}`.trim();
+  orgId: '',
+  status: 'arrived',
 };
 
 // ─── Encounter Module ──────────────────────────────────────────────────────────
@@ -41,69 +37,122 @@ const formatName = (names?: Array<{ family?: string; given?: string[] }>) => {
 export const EncounterModule: React.FC = () => {
   const [form, setForm] = useState<EncounterFormState>(INITIAL_FORM);
   const [nikInput, setNikInput] = useState('');
-  const [foundPatient, setFoundPatient] = useState<FHIRPatient | null>(null);
-  const [practitioners, setPractitioners] = useState<FHIRPractitioner[]>([]);
-  const [locations, setLocations] = useState<FHIRLocation[]>([]);
+  const [patientVerified, setPatientVerified] = useState(false);
   const [submittedEncounter, setSubmittedEncounter] = useState<FHIREncounter | null>(null);
 
   const { isLoading: searchLoading, execute: executeSearch } = useFetch();
-  const { isLoading: loadLoading, execute: executeLoad } = useFetch();
   const { isLoading: submitLoading, error: submitError, execute: executeSubmit } = useFetch();
   const { toasts, addToast, removeToast } = useToast();
 
-  // Load practitioners & locations on mount
-  const loadDropdownData = useCallback(async () => {
-    await executeLoad(async () => {
-      const [practBundle, locBundle] = await Promise.all([
-        practitionerAPI.getAll(),
-        locationAPI.getAll(),
-      ]);
+  // ── Patient lookup ──────────────────────────────────────────────────────────
 
-      const practList =
-        practBundle.entry
-          ?.filter((e) => e.resource?.resourceType === 'Practitioner')
-          .map((e) => e.resource as FHIRPractitioner) ?? [];
-
-      const locList =
-        locBundle.entry
-          ?.filter((e) => e.resource?.resourceType === 'Location')
-          .map((e) => e.resource as FHIRLocation) ?? [];
-
-      setPractitioners(practList);
-      setLocations(locList);
-    });
-  }, [executeLoad]);
-
-  useEffect(() => {
-    loadDropdownData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Search patient by NIK
   const handleSearchPatient = async () => {
     if (!/^\d{16}$/.test(nikInput)) {
       addToast('NIK harus tepat 16 digit angka', 'error');
       return;
     }
 
-    setFoundPatient(null);
-    setForm((p) => ({ ...p, patientId: '', patientNIK: '' }));
+    setPatientVerified(false);
+    setForm((p) => ({ ...p, patientIHS: '', patientName: '', patientNIK: '' }));
 
     await executeSearch(async () => {
-      const result = await patientAPI.searchByNIK(nikInput);
-      const patient = result.entry?.find(
+      const bundle = await patientAPI.searchByNIK(nikInput);
+      const entry = (bundle.entry ?? []).find(
         (e) => e.resource?.resourceType === 'Patient'
-      )?.resource as FHIRPatient | undefined;
+      );
+      const patient = entry?.resource as any;
 
-      if (patient) {
-        setFoundPatient(patient);
-        setForm((p) => ({ ...p, patientId: patient.id, patientNIK: nikInput }));
-        addToast(`Pasien ditemukan: ${formatName(patient.name)}`, 'success');
+      if (patient?.id) {
+        const name = formatName(patient.name);
+        setPatientVerified(true);
+        setForm((p) => ({
+          ...p,
+          patientIHS: patient.id,
+          patientName: name,
+          patientNIK: nikInput,
+        }));
+        addToast(`Pasien ditemukan: ${name}`, 'success');
       } else {
-        addToast('Pasien dengan NIK tersebut tidak ditemukan', 'error');
+        addToast('Pasien tidak ditemukan di SATUSEHAT', 'error');
       }
     });
   };
+
+  // ── Encounter submit ────────────────────────────────────────────────────────
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!form.patientIHS) {
+      addToast('Verifikasi pasien terlebih dahulu', 'error');
+      return;
+    }
+    if (!form.practitionerIHS.trim()) {
+      addToast('Masukkan IHS Number praktisi', 'error');
+      return;
+    }
+    if (!form.locationId.trim()) {
+      addToast('Masukkan Location ID', 'error');
+      return;
+    }
+    if (!form.orgId.trim()) {
+      addToast('Masukkan Organization ID', 'error');
+      return;
+    }
+
+    await executeSubmit(async () => {
+      const now = new Date().toISOString();
+
+      const payload: Partial<FHIREncounter> = {
+        resourceType: 'Encounter',
+        identifier: [
+          {
+            system: `http://sys-ids.kemkes.go.id/encounter/${form.orgId.trim()}`,
+            value: `enc-${Date.now()}`,
+          },
+        ],
+        status: form.status as any,
+        class: {
+          system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode',
+          code: 'AMB',
+          display: 'ambulatory',
+        },
+        subject: {
+          reference: `Patient/${form.patientIHS}`,
+          display: form.patientName,
+        },
+        participant: [
+          {
+            type: [
+              {
+                coding: [
+                  {
+                    system: 'http://terminology.hl7.org/CodeSystem/v3-ParticipationType',
+                    code: 'ATND',
+                    display: 'attender',
+                  },
+                ],
+              },
+            ],
+            individual: { reference: `Practitioner/${form.practitionerIHS.trim()}` },
+          },
+        ],
+        period: { start: now },
+        location: [{ location: { reference: `Location/${form.locationId.trim()}` } }],
+        statusHistory: [{ status: form.status as any, period: { start: now } }],
+        serviceProvider: { reference: `Organization/${form.orgId.trim()}` },
+      };
+
+      const result = await encounterAPI.create(payload);
+      setSubmittedEncounter(result);
+      addToast('Kunjungan medis berhasil dibuat! 🎉', 'success', 6000);
+      setForm(INITIAL_FORM);
+      setNikInput('');
+      setPatientVerified(false);
+    });
+  };
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
@@ -112,66 +161,22 @@ export const EncounterModule: React.FC = () => {
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!form.patientId) {
-      addToast('Pilih pasien terlebih dahulu', 'error');
-      return;
-    }
-    if (!form.practitionerId) {
-      addToast('Pilih praktisi terlebih dahulu', 'error');
-      return;
-    }
-    if (!form.locationId) {
-      addToast('Pilih lokasi terlebih dahulu', 'error');
-      return;
-    }
-
-    await executeSubmit(async () => {
-      const payload: Partial<FHIREncounter> = {
-        resourceType: 'Encounter',
-        status: form.status as any,
-        subject: { reference: `Patient/${form.patientId}` },
-        participant: [
-          {
-            individual: { reference: `Practitioner/${form.practitionerId}` },
-          },
-        ],
-        location: [
-          {
-            location: { reference: `Location/${form.locationId}` },
-          },
-        ],
-      };
-
-      const result = await encounterAPI.create(payload);
-      setSubmittedEncounter(result);
-      addToast('Kunjungan medis berhasil dibuat', 'success');
-      // Reset form
-      setForm(INITIAL_FORM);
-      setNikInput('');
-      setFoundPatient(null);
-    });
+  const formatName = (names?: Array<{ family?: string; given?: string[] }>) => {
+    if (!names || names.length === 0) return 'Tanpa Nama';
+    const n = names[0];
+    return `${(n.given ?? []).join(' ')} ${n.family ?? ''}`.trim();
   };
 
-  const isFormValid = form.patientId && form.practitionerId && form.locationId;
+  const isFormValid =
+    patientVerified && form.practitionerIHS.trim() && form.locationId.trim() && form.orgId.trim();
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-900">Manajemen Kunjungan Medis</h2>
-        <button
-          id="btn-refresh-encounter"
-          onClick={loadDropdownData}
-          disabled={loadLoading}
-          title="Muat ulang data praktisi & lokasi"
-          className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors text-sm"
-        >
-          <RefreshCw size={15} className={loadLoading ? 'animate-spin' : ''} />
-          Muat Ulang
-        </button>
       </div>
 
       {/* Success Banner */}
@@ -179,12 +184,12 @@ export const EncounterModule: React.FC = () => {
         <div className="flex items-start gap-4 bg-green-50 border border-green-200 rounded-lg px-5 py-4">
           <CheckCircle2 size={22} className="text-green-600 mt-0.5 flex-shrink-0" />
           <div className="flex-1">
-            <p className="font-semibold text-green-800">Kunjungan Medis Berhasil Dibuat</p>
-            <p className="text-sm text-green-700 mt-0.5">
-              FHIR Encounter ID:{' '}
-              <span className="font-mono bg-green-100 px-1.5 py-0.5 rounded text-xs">
+            <p className="font-semibold text-green-800">Kunjungan Medis Berhasil Dibuat! 🎉</p>
+            <p className="text-sm text-green-700 mt-1">
+              Encounter ID:{' '}
+              <code className="font-mono bg-green-100 px-1.5 py-0.5 rounded text-xs">
                 {submittedEncounter.id}
-              </span>
+              </code>
             </p>
             <p className="text-sm text-green-700 mt-0.5">
               Status:{' '}
@@ -200,7 +205,7 @@ export const EncounterModule: React.FC = () => {
         </div>
       )}
 
-      {/* Transactional Form */}
+      {/* Form */}
       <form
         id="encounter-form"
         onSubmit={handleSubmit}
@@ -212,13 +217,14 @@ export const EncounterModule: React.FC = () => {
         </div>
 
         <div className="p-6 space-y-6">
+
           {/* ── STEP 1: Cari Pasien ──────────────────────────────────── */}
           <section className="space-y-3">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2">
               <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold">
                 1
               </span>
-              <h4 className="font-semibold text-gray-800">Cari Pasien berdasarkan NIK</h4>
+              <h4 className="font-semibold text-gray-800">Cari & Verifikasi Pasien</h4>
             </div>
 
             <div className="flex gap-2">
@@ -227,8 +233,8 @@ export const EncounterModule: React.FC = () => {
                 type="text"
                 value={nikInput}
                 onChange={(e) => {
-                  const v = e.target.value.replace(/\D/g, '').slice(0, 16);
-                  setNikInput(v);
+                  setNikInput(e.target.value.replace(/\D/g, '').slice(0, 16));
+                  setPatientVerified(false);
                 }}
                 onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleSearchPatient())}
                 placeholder="Masukkan NIK pasien (16 digit)"
@@ -242,28 +248,27 @@ export const EncounterModule: React.FC = () => {
                 disabled={searchLoading || nikInput.length !== 16}
                 className="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
               >
-                {searchLoading ? 'Mencari...' : 'Cari'}
+                {searchLoading ? 'Mencari...' : 'Verifikasi'}
               </button>
             </div>
 
-            {/* Found Patient Card */}
-            {foundPatient && (
+            {/* Verified patient card */}
+            {patientVerified && form.patientIHS && (
               <div className="flex items-center gap-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                 <div className="w-10 h-10 rounded-full bg-blue-200 flex items-center justify-center flex-shrink-0">
                   <span className="text-blue-700 font-bold text-sm">
-                    {formatName(foundPatient.name).charAt(0)}
+                    {form.patientName.charAt(0)}
                   </span>
                 </div>
                 <div className="flex-1">
-                  <p className="font-semibold text-gray-900">{formatName(foundPatient.name)}</p>
+                  <p className="font-semibold text-gray-900">{form.patientName}</p>
                   <p className="text-xs text-gray-600 mt-0.5">
-                    NIK: <span className="font-mono">{nikInput}</span> &bull;{' '}
-                    {foundPatient.gender === 'male'
-                      ? 'Laki-laki'
-                      : foundPatient.gender === 'female'
-                      ? 'Perempuan'
-                      : foundPatient.gender ?? '—'}{' '}
-                    &bull; Lahir: {foundPatient.birthDate ?? '—'}
+                    NIK: <span className="font-mono">{form.patientNIK}</span>
+                    {' · '}
+                    IHS:{' '}
+                    <code className="font-mono bg-blue-100 px-1 py-0.5 rounded text-xs">
+                      {form.patientIHS}
+                    </code>
                   </p>
                 </div>
                 <CheckCircle2 size={20} className="text-green-500 flex-shrink-0" />
@@ -273,162 +278,117 @@ export const EncounterModule: React.FC = () => {
 
           <hr className="border-gray-100" />
 
-          {/* ── STEP 2: Pilih Praktisi ───────────────────────────────── */}
+          {/* ── STEP 2: Practitioner IHS ─────────────────────────────── */}
           <section className="space-y-3">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2">
               <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold">
                 2
               </span>
-              <h4 className="font-semibold text-gray-800">Pilih Praktisi</h4>
+              <h4 className="font-semibold text-gray-800">IHS Number Praktisi</h4>
             </div>
 
-            <select
-              id="select-encounter-practitioner"
-              name="practitionerId"
-              value={form.practitionerId}
+            <input
+              id="input-encounter-practitioner-ihs"
+              type="text"
+              name="practitionerIHS"
+              value={form.practitionerIHS}
               onChange={handleChange}
-              className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-sm"
-            >
-              <option value="">-- Pilih Praktisi --</option>
-              {loadLoading && <option disabled>Memuat data...</option>}
-              {practitioners.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {formatName(p.name)}
-                  {p.qualification?.[0]?.code?.text
-                    ? ` — ${p.qualification[0].code.text}`
-                    : ''}
-                </option>
-              ))}
-            </select>
-
-            {practitioners.length === 0 && !loadLoading && (
-              <p className="text-xs text-amber-600 flex items-center gap-1">
-                <AlertCircle size={12} />
-                Belum ada data praktisi. Tambahkan terlebih dahulu di modul Praktisi.
-              </p>
-            )}
+              placeholder="Contoh: 10009880728 (dari modul Praktisi)"
+              className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-sm font-mono"
+            />
+            <p className="text-xs text-gray-500">
+              Salin IHS Number dari tabel hasil pencarian di modul Praktisi.
+            </p>
           </section>
 
           <hr className="border-gray-100" />
 
-          {/* ── STEP 3: Pilih Lokasi ─────────────────────────────────── */}
+          {/* ── STEP 3: Location ID ───────────────────────────────────── */}
           <section className="space-y-3">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2">
               <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold">
                 3
               </span>
-              <h4 className="font-semibold text-gray-800">Pilih Lokasi</h4>
+              <h4 className="font-semibold text-gray-800">Location ID (UUID)</h4>
             </div>
 
-            <select
-              id="select-encounter-location"
+            <input
+              id="input-encounter-location-id"
+              type="text"
               name="locationId"
               value={form.locationId}
               onChange={handleChange}
-              className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-sm"
-            >
-              <option value="">-- Pilih Lokasi --</option>
-              {loadLoading && <option disabled>Memuat data...</option>}
-              {locations.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name ?? l.id}
-                  {l.physicalType?.text ? ` (${l.physicalType.text})` : ''}
-                </option>
-              ))}
-            </select>
-
-            {locations.length === 0 && !loadLoading && (
-              <p className="text-xs text-amber-600 flex items-center gap-1">
-                <AlertCircle size={12} />
-                Belum ada data lokasi. Tambahkan terlebih dahulu di modul Lokasi.
-              </p>
-            )}
+              placeholder="Contoh: 4079d4e0-bf66-43f7-96b4-8e814a654511 (dari modul Lokasi)"
+              className="w-full px-4 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-sm font-mono"
+            />
+            <p className="text-xs text-gray-500">
+              Salin Location UUID dari tabel di modul Lokasi setelah berhasil membuat lokasi.
+            </p>
           </section>
 
           <hr className="border-gray-100" />
 
-          {/* ── STEP 4: Detail Tambahan ──────────────────────────────── */}
+          {/* ── STEP 4: Org & Status ──────────────────────────────────── */}
           <section className="space-y-4">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2">
               <span className="flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold">
                 4
               </span>
-              <h4 className="font-semibold text-gray-800">Detail Tambahan</h4>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Status Kunjungan
-                </label>
-                <select
-                  id="select-encounter-status"
-                  name="status"
-                  value={form.status}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-sm"
-                >
-                  <option value="planned">Direncanakan</option>
-                  <option value="arrived">Tiba</option>
-                  <option value="triaged">Triase</option>
-                  <option value="in-progress">Sedang Berlangsung</option>
-                  <option value="onleave">Izin Keluar</option>
-                  <option value="finished">Selesai</option>
-                  <option value="cancelled">Dibatalkan</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Jenis Layanan
-                </label>
-                <select
-                  id="select-encounter-service-type"
-                  name="serviceType"
-                  value={form.serviceType}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-sm"
-                >
-                  <option value="">-- Pilih Jenis Layanan --</option>
-                  <option value="outpatient">Rawat Jalan</option>
-                  <option value="inpatient">Rawat Inap</option>
-                  <option value="emergency">Gawat Darurat</option>
-                  <option value="observation">Observasi</option>
-                  <option value="home-health">Kunjungan Rumah</option>
-                </select>
-              </div>
+              <h4 className="font-semibold text-gray-800">Detail Kunjungan</h4>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                Alasan Kunjungan <span className="text-gray-400 font-normal">(opsional)</span>
+                Organization ID (UUID) <span className="text-red-500">*</span>
               </label>
-              <textarea
-                id="input-encounter-reason"
-                name="reasonText"
-                value={form.reasonText}
+              <input
+                id="input-encounter-org-id"
+                type="text"
+                name="orgId"
+                value={form.orgId}
                 onChange={handleChange}
-                placeholder="Deskripsi singkat alasan kunjungan medis..."
-                rows={3}
-                className="w-full px-3 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-sm resize-none"
+                placeholder="UUID organisasi dari SSP portal SATUSEHAT"
+                className="w-full px-3 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-sm font-mono"
               />
+              <p className="text-xs text-gray-500 mt-1">
+                Harus sesuai dengan akun yang memiliki CLIENT_ID dan CLIENT_SECRET.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Status Kunjungan
+              </label>
+              <select
+                id="select-encounter-status"
+                name="status"
+                value={form.status}
+                onChange={handleChange}
+                className="w-full px-3 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-sm"
+              >
+                <option value="planned">Direncanakan (planned)</option>
+                <option value="arrived">Tiba (arrived)</option>
+                <option value="triaged">Triase (triaged)</option>
+                <option value="in-progress">Sedang Berlangsung (in-progress)</option>
+                <option value="finished">Selesai (finished)</option>
+                <option value="cancelled">Dibatalkan (cancelled)</option>
+              </select>
             </div>
           </section>
         </div>
 
         {/* Form Footer */}
         <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
-          <div className="text-xs text-gray-500">
-            {!isFormValid && (
+          <div className="text-xs">
+            {!isFormValid ? (
               <span className="flex items-center gap-1 text-amber-600">
                 <AlertCircle size={12} />
-                Lengkapi Pasien, Praktisi, dan Lokasi untuk melanjutkan.
+                Lengkapi semua field yang diperlukan.
               </span>
-            )}
-            {isFormValid && (
+            ) : (
               <span className="flex items-center gap-1 text-green-600">
                 <CheckCircle2 size={12} />
-                Form siap untuk dikirim.
+                Form siap dikirim ke SATUSEHAT.
               </span>
             )}
           </div>
